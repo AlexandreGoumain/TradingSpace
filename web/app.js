@@ -502,14 +502,21 @@ function renderTape(listElement, trades) {
 }
 
 function renderMetrics(container, metrics) {
+  if (!container) {
+    return;
+  }
+
   container.innerHTML = "";
   metrics.forEach((metric) => {
-    const term = document.createElement("dt");
-    term.textContent = metric.label;
-    const description = document.createElement("dd");
-    description.innerHTML = `<strong>${metric.value}</strong><span>${metric.hint}</span>`;
-    container.appendChild(term);
-    container.appendChild(description);
+    const item = document.createElement("div");
+    item.className = "metrics__item";
+    item.setAttribute("role", "listitem");
+    item.innerHTML = `
+      <span class="metrics__label">${metric.label}</span>
+      <strong class="metrics__value">${metric.value}</strong>
+      <span class="metrics__hint">${metric.hint}</span>
+    `;
+    container.appendChild(item);
   });
 }
 
