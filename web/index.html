@@ -30,13 +30,27 @@
             <input id="symbol-search" class="input" type="search" placeholder="Rechercher un actif" />
           </div>
           <div class="toolbar__group">
-            <span class="toolbar__label">Unités de temps</span>
-            <div class="toolbar__buttons" role="group" aria-label="Sélection de timeframe">
-              <button class="chip" data-timeframe="1m">1m</button>
-              <button class="chip" data-timeframe="5m">5m</button>
-              <button class="chip chip--active" data-timeframe="15m">15m</button>
-              <button class="chip" data-timeframe="1h">1h</button>
-              <button class="chip" data-timeframe="1d">1j</button>
+            <label class="toolbar__label" for="chart-type">Type de graphique</label>
+            <select id="chart-type" class="select" aria-label="Choisir le type de graphique">
+              <option value="time">Temps</option>
+              <option value="tick">Ticks</option>
+              <option value="volume">Volume</option>
+              <option value="range">Range</option>
+            </select>
+          </div>
+          <div class="toolbar__group">
+            <span class="toolbar__label" id="chart-aggregation-label">Unités de temps</span>
+            <div
+              class="toolbar__buttons"
+              id="chart-aggregation-buttons"
+              role="group"
+              aria-label="Sélection de timeframe"
+            >
+              <button class="chip" data-aggregation="1m">1m</button>
+              <button class="chip" data-aggregation="5m">5m</button>
+              <button class="chip chip--active" data-aggregation="15m">15m</button>
+              <button class="chip" data-aggregation="1h">1h</button>
+              <button class="chip" data-aggregation="1d">1j</button>
             </div>
           </div>
           <div class="toolbar__group">
