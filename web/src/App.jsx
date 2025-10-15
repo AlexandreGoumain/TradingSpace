@@ -1,370 +1,456 @@
-import { useEffect, useMemo, useState } from "react";
-import { Activity, LayoutDashboard, Zap } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CHART_AGGREGATIONS,
-  TEMPLATE_CONFIGS,
-  buildSeriesForMode
-} from "./lib/charting.js";
-import { mockPriceSeries, mockOrderBook, mockTrades, mockMetrics, mockAlerts } from "./data/mock-data.js";
-import { cn } from "./lib/utils.js";
+  AlertTriangle,
+  ArrowUpRight,
+  CheckCircle2,
+  Clock,
+  Loader2,
+  MonitorPlay,
+  PanelsTopLeft,
+  Sparkles,
+  SquareArrowOutUpRight
+} from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card.jsx";
-import { Button } from "./components/ui/button.jsx";
 import { Badge } from "./components/ui/badge.jsx";
-import { Input } from "./components/ui/input.jsx";
-import { Select } from "./components/ui/select.jsx";
-import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs.jsx";
-import { Toggle } from "./components/ui/toggle.jsx";
-import { Switch } from "./components/ui/switch.jsx";
-import { PriceChart } from "./components/price-chart.jsx";
-import { DepthBook } from "./components/depth-book.jsx";
-import { ExecutionTape } from "./components/execution-tape.jsx";
-import { MetricsGrid } from "./components/metrics-grid.jsx";
-import { AlertsPanel } from "./components/alerts-panel.jsx";
+import { Button } from "./components/ui/button.jsx";
+import { ChartWorkspace } from "./pages/chart-workspace.jsx";
+import { CHART_BLUEPRINTS } from "./data/chart-blueprints.js";
 
-const INDICATORS = [
-  { key: "ema", label: "EMA", default: true },
-  { key: "vwaps", label: "VWAP", default: false },
-  { key: "volumeProfile", label: "Profil volume", default: true }
-];
+const DEFAULT_BLUEPRINT = CHART_BLUEPRINTS[0];
 
-function createInitialOrderBook() {
-  return {
-    bids: mockOrderBook.bids.map((level) => ({ ...level })),
-    asks: mockOrderBook.asks.map((level) => ({ ...level }))
-  };
+function createSessionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `session-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function recalcCumulative(levels) {
-  let cumulative = 0;
-  return levels.map((level) => {
-    cumulative += level.size;
-    return { ...level, cumulative };
-  });
+function formatRelativeTime(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (diffSeconds < 5) {
+    return "à l'instant";
+  }
+  if (diffSeconds < 60) {
+    return `il y a ${diffSeconds}s`;
+  }
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) {
+    return `il y a ${diffMinutes} min`;
+  }
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `il y a ${diffHours} h`;
+  }
+  const diffDays = Math.floor(diffHours / 24);
+  return `il y a ${diffDays} j`;
+}
+
+function useInitialView() {
+  return useMemo(() => {
+    if (typeof window === "undefined") {
+      return { view: "menu", chartId: DEFAULT_BLUEPRINT.id };
+    }
+    const params = new URLSearchParams(window.location.search);
+    const requestedView = params.get("view") === "workspace" ? "workspace" : "menu";
+    const requestedChartId = params.get("chart");
+    const chart = CHART_BLUEPRINTS.find((item) => item.id === requestedChartId) ?? DEFAULT_BLUEPRINT;
+    return { view: requestedView, chartId: chart.id };
+  }, []);
 }
 
 export default function App() {
-  const [chartMode, setChartMode] = useState("time");
-  const [aggregation, setAggregation] = useState(CHART_AGGREGATIONS.time.defaultOption);
-  const [indicators, setIndicators] = useState(() =>
-    INDICATORS.reduce((acc, item) => ({ ...acc, [item.key]: item.default }), {})
-  );
-  const [template, setTemplate] = useState("balanced");
-  const [orderBook, setOrderBook] = useState(() => createInitialOrderBook());
-  const [tradeTape, setTradeTape] = useState(() => [...mockTrades]);
-  const [latency, setLatency] = useState(1.6);
-  const [connectivity, setConnectivity] = useState(96);
-  const [symbol, setSymbol] = useState("ES 03-24");
+  const initial = useInitialView();
+  const [appView, setAppView] = useState(initial.view);
+  const [activeBlueprintId, setActiveBlueprintId] = useState(initial.chartId);
+  const [detachedSessions, setDetachedSessions] = useState([]);
+  const detachedWindowRefs = useRef(new Map());
+
+  const activeBlueprint = CHART_BLUEPRINTS.find((item) => item.id === activeBlueprintId) ?? DEFAULT_BLUEPRINT;
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLatency((prev) => {
-        const next = 1.4 + Math.random() * 2;
-        return Number.parseFloat(next.toFixed(2));
-      });
-      setConnectivity(() => Math.max(75, Math.min(100, 90 + (Math.random() - 0.5) * 12)));
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams();
+    if (appView === "workspace") {
+      params.set("view", "workspace");
+      params.set("chart", activeBlueprintId);
+    } else {
+      params.set("view", "menu");
+    }
+    const query = params.toString();
+    const nextUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+    window.history.replaceState({}, "", nextUrl);
+  }, [appView, activeBlueprintId]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setOrderBook((prev) => {
-        const bids = [...prev.bids];
-        const asks = [...prev.asks];
-        const bidShift = bids.shift();
-        const askShift = asks.shift();
-        if (bidShift) {
-          bids.push({
-            price: bidShift.price - 0.25,
-            size: Math.max(20, Math.round(bidShift.size * (0.8 + Math.random() * 0.4))),
-            cumulative: 0
+    if (typeof document === "undefined") {
+      return;
+    }
+    if (appView === "menu") {
+      document.title = "TradingSpace Atelier";
+    }
+  }, [appView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const handleMessage = (event) => {
+      if (!event?.data || typeof event.data !== "object") {
+        return;
+      }
+      if (event.origin && event.origin !== window.location.origin) {
+        return;
+      }
+
+      if (event.data.type === "workspace-status" && event.data.sessionId) {
+        setDetachedSessions((prev) => {
+          const next = prev.map((session) => {
+            if (session.id !== event.data.sessionId) {
+              return session;
+            }
+            const lastUpdated = event.data.lastUpdated ? new Date(event.data.lastUpdated) : session.lastUpdated;
+            return {
+              ...session,
+              symbol: event.data.symbol ?? session.symbol,
+              aggregation: event.data.aggregation ?? session.aggregation,
+              displayAggregation: event.data.displayAggregation ?? session.displayAggregation,
+              chartMode: event.data.chartMode ?? session.chartMode,
+              template: event.data.template ?? session.template,
+              priceSource: event.data.priceSource ?? session.priceSource,
+              isLoading: Boolean(event.data.isLoading),
+              error: event.data.error ?? null,
+              lastUpdated,
+              lastPing: new Date(event.data.timestamp ?? Date.now())
+            };
           });
-        }
-        if (askShift) {
-          asks.push({
-            price: askShift.price + 0.25,
-            size: Math.max(20, Math.round(askShift.size * (0.8 + Math.random() * 0.4))),
-            cumulative: 0
-          });
-        }
-        const updated = {
-          bids: recalcCumulative(bids),
-          asks: recalcCumulative(asks)
-        };
-        setTradeTape((prevTape) => {
-          const bestBid = updated.bids[0];
-          const bestAsk = updated.asks[0];
-          const midPrice =
-            bestBid && bestAsk ? (bestAsk.price + bestBid.price) / 2 : prevTape[0]?.price ?? 0;
-          const trade = {
-            time: new Date().toLocaleTimeString("fr-FR", { hour12: false }),
-            price: midPrice,
-            size: Math.round(5 + Math.random() * 30),
-            aggressor: Math.random() > 0.5 ? "Acheteur" : "Vendeur"
-          };
-          return [trade, ...prevTape].slice(0, 20);
+          return next;
         });
-        return updated;
-      });
-    }, 5000);
-    return () => clearInterval(interval);
+      }
+
+      if (event.data.type === "workspace-closed" && event.data.sessionId) {
+        const sessionId = event.data.sessionId;
+        setDetachedSessions((prev) => prev.filter((session) => session.id !== sessionId));
+        detachedWindowRefs.current.delete(sessionId);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
   }, []);
 
   useEffect(() => {
-    const config = CHART_AGGREGATIONS[chartMode] ?? CHART_AGGREGATIONS.time;
-    setAggregation(config.defaultOption);
-  }, [chartMode]);
+    if (typeof window === "undefined") {
+      return undefined;
+    }
 
-  const aggregationConfig = CHART_AGGREGATIONS[chartMode] ?? CHART_AGGREGATIONS.time;
+    const interval = window.setInterval(() => {
+      setDetachedSessions((prev) => {
+        const next = prev.filter((session) => {
+          const ref = detachedWindowRefs.current.get(session.id);
+          if (!ref || ref.closed) {
+            detachedWindowRefs.current.delete(session.id);
+            return false;
+          }
+          return true;
+        });
+        return next.length === prev.length ? prev : next;
+      });
+    }, 2000);
 
-  const chartSeries = useMemo(
-    () => buildSeriesForMode(mockPriceSeries, chartMode, aggregation),
-    [chartMode, aggregation]
-  );
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, []);
 
-  const templateConfig = TEMPLATE_CONFIGS[template] ?? TEMPLATE_CONFIGS.balanced;
+  useEffect(() => {
+    return () => {
+      detachedWindowRefs.current.forEach((ref) => {
+        if (ref && !ref.closed) {
+          try {
+            ref.close();
+          } catch (error) {
+            console.warn("Impossible de fermer la fenêtre détachée", error);
+          }
+        }
+      });
+      detachedWindowRefs.current.clear();
+    };
+  }, []);
 
-  const toggleIndicator = (key) => {
-    setIndicators((prev) => ({ ...prev, [key]: !prev[key] }));
+  const focusDetachedSession = useCallback((sessionId) => {
+    const ref = detachedWindowRefs.current.get(sessionId);
+    if (ref && !ref.closed) {
+      ref.focus();
+    }
+  }, []);
+
+  const closeDetachedSession = useCallback((sessionId) => {
+    const ref = detachedWindowRefs.current.get(sessionId);
+    if (ref && !ref.closed) {
+      ref.close();
+    }
+    detachedWindowRefs.current.delete(sessionId);
+    setDetachedSessions((prev) => prev.filter((session) => session.id !== sessionId));
+  }, []);
+
+  const openWorkspaceHere = (blueprint) => {
+    setActiveBlueprintId(blueprint.id);
+    setAppView("workspace");
   };
 
-  const modulesVisibility = templateConfig.modules;
+  const openWorkspaceWindow = (blueprint) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const sessionId = createSessionId();
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "workspace");
+    url.searchParams.set("chart", blueprint.id);
+    url.searchParams.set("session", sessionId);
+    const child = window.open(
+      url.toString(),
+      "_blank",
+      "noopener,noreferrer,width=1440,height=900"
+    );
+
+    if (child) {
+      const defaultAggregation = blueprint?.config?.aggregation ?? null;
+      const defaultMode = blueprint?.config?.chartMode ?? "time";
+      const formattedAggregation = defaultAggregation
+        ? defaultMode === "time"
+          ? defaultAggregation
+          : `${defaultAggregation} · ${defaultMode}`
+        : null;
+      const initialSession = {
+        id: sessionId,
+        blueprintId: blueprint.id,
+        blueprintName: blueprint.name,
+        symbol: blueprint?.config?.symbol ?? blueprint.symbol ?? "—",
+        aggregation: defaultAggregation,
+        displayAggregation: formattedAggregation,
+        chartMode: defaultMode,
+        template: blueprint?.config?.template ?? "balanced",
+        openedAt: new Date(),
+        lastPing: null,
+        lastUpdated: null,
+        priceSource: "Initialisation",
+        isLoading: true,
+        error: null
+      };
+      detachedWindowRefs.current.set(sessionId, child);
+      setDetachedSessions((prev) => [...prev, initialSession]);
+    }
+  };
+
+  if (appView === "workspace") {
+    return <ChartWorkspace blueprint={activeBlueprint} onBackToMenu={() => setAppView("menu")} />;
+  }
+
+  const timeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat("fr-FR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }),
+    []
+  );
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-zinc-950 via-zinc-950 to-neutral-900">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.04),_transparent_60%)]" />
-      <div className="relative z-10 mx-auto flex max-w-[1600px] gap-6 px-8 py-10">
-        <aside className="flex w-[320px] flex-col gap-6">
-          <Card className="card-surface">
-            <CardHeader>
-              <div>
-                <Badge variant="soft" className="text-xs uppercase tracking-[0.3em]">
-                  TradingSpace
-                </Badge>
-                <CardTitle className="mt-3 text-2xl">Studio institutionnel</CardTitle>
-                <CardDescription className="mt-2 text-sm leading-relaxed">
-                  Infrastructure de trading intraday pour desks pros.
-                </CardDescription>
-              </div>
-              <div className="flex flex-col items-end gap-3 text-sm">
-                <span className="flex items-center gap-2 text-muted-foreground">
-                  <Zap className="h-4 w-4 text-emerald-300" /> Marché ouvert
-                </span>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Activity className="h-4 w-4" /> {latency.toFixed(2)} ms
-                </div>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <LayoutDashboard className="h-4 w-4" /> {Math.round(connectivity)}% sync
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Symbole</span>
-                <Input
-                  value={symbol}
-                  onChange={(event) => setSymbol(event.target.value)}
-                  className="mt-2"
-                  placeholder="Rechercher un actif"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Marché</p>
-                  <p className="mt-1 font-medium">CME Futures</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Fuseau</p>
-                  <p className="mt-1 font-medium">Europe / Paris</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Rythme</p>
-                  <p className="mt-1 font-medium">Intraday 15'</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Connectivité</p>
-                  <p className="mt-1 font-medium">Streaming direct</p>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <Button className="flex-1">Passer un ordre</Button>
-                <Button variant="ghost" className="flex-1 border border-border/60">
-                  Mode clair
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {modulesVisibility.metrics ? (
-            <Card>
-              <CardHeader>
-                <div>
-                  <CardTitle>Métriques clés</CardTitle>
-                  <CardDescription>Lecture instantanée des flux</CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <MetricsGrid metrics={mockMetrics} />
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {modulesVisibility.alerts ? (
-            <Card>
-              <CardHeader>
-                <div>
-                  <CardTitle>Alerting tactique</CardTitle>
-                  <CardDescription>Signaux prêts à déclenchement</CardDescription>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <AlertsPanel alerts={mockAlerts} />
-              </CardContent>
-            </Card>
-          ) : null}
-        </aside>
-
-        <div className="flex-1 space-y-6">
-          <header className="flex items-start justify-between">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-[#050509] via-[#080714] to-[#070512] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(120,120,255,0.12),_transparent_60%)]" />
+      <div className="relative z-10 mx-auto flex max-w-[1200px] flex-col gap-16 px-8 py-16">
+        <header className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Workspace</p>
-              <h1 className="mt-3 text-4xl font-semibold text-white">{symbol}</h1>
-              <p className="mt-2 text-sm text-muted-foreground">Futures S&P 500 · CME Globex</p>
+              <Badge variant="soft" className="text-xs uppercase tracking-[0.4em] text-white/80">
+                TradingSpace Atelier
+              </Badge>
+              <h1 className="mt-5 text-5xl font-semibold tracking-tight">
+                Choisissez votre environnement graphique
+              </h1>
             </div>
-            <div className="rounded-2xl border border-border/60 bg-secondary/60 px-6 py-4 text-right">
-              <p className="text-3xl font-semibold text-white">4 527,75</p>
-              <p className="text-sm text-emerald-300">+12,5 (+0,28%)</p>
-              <div className="mt-3 flex items-center justify-end gap-3 text-xs text-muted-foreground">
-                <span>Latence</span>
-                <span>{latency.toFixed(2)} ms</span>
-                <span className="h-1 w-1 rounded-full bg-emerald-300" />
-                <span>Sync {Math.round(connectivity)}%</span>
-              </div>
+            <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/70">
+              <Sparkles className="h-4 w-4 text-emerald-300" />
+              <span>Inspiré par ATAS & Sierra Chart</span>
             </div>
-          </header>
-
-          <Card>
-            <CardHeader className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <CardTitle>Courbe de prix</CardTitle>
-                <CardDescription>{aggregationConfig.aggregationLabel}</CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <Select
-                  value={chartMode}
-                  onChange={(event) => setChartMode(event.target.value)}
-                  className="w-[170px]"
-                >
-                  {Object.entries(CHART_AGGREGATIONS).map(([key, config]) => (
-                    <option key={key} value={key}>
-                      {config.label}
-                    </option>
-                  ))}
-                </Select>
-                <Tabs value={aggregation} onValueChange={setAggregation}>
-                  <TabsList>
-                    {aggregationConfig.options.map((option) => (
-                      <TabsTrigger key={option.value} value={option.value}>
-                        {option.label}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                </Tabs>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <PriceChart series={chartSeries} indicators={indicators} />
-              <div className="flex flex-wrap items-center gap-3">
-                {INDICATORS.map((indicator) => (
-                  <Toggle
-                    key={indicator.key}
-                    pressed={indicators[indicator.key]}
-                    onClick={() => toggleIndicator(indicator.key)}
-                  >
-                    {indicator.label}
-                  </Toggle>
-                ))}
-                <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Auto refresh</span>
-                  <Switch checked onCheckedChange={() => {}} readOnly />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-            {modulesVisibility.depth ? (
-              <Card>
-                <CardHeader className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Profondeur de marché</CardTitle>
-                    <CardDescription>Carnet x10 mis à jour en continu</CardDescription>
-                  </div>
-                  <Badge variant="outline">Consolidé</Badge>
-                </CardHeader>
-                <CardContent className="grid gap-6 md:grid-cols-2">
-                  <DepthBook title="Bids" levels={orderBook.bids} variant="bid" />
-                  <DepthBook title="Asks" levels={orderBook.asks} variant="ask" />
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {modulesVisibility.tape ? (
-              <Card>
-                <CardHeader className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Flux d'exécution</CardTitle>
-                    <CardDescription>Transactions agressées en temps réel</CardDescription>
-                  </div>
-                  <Badge variant="soft">Realtime</Badge>
-                </CardHeader>
-                <CardContent>
-                  <ExecutionTape trades={tradeTape} />
-                </CardContent>
-              </Card>
-            ) : null}
           </div>
+          <p className="max-w-2xl text-lg text-white/70">
+            Sélectionnez une salle de marché, ouvrez-la dans une nouvelle fenêtre dédiée ou remplacez l'espace courant.
+            Chaque configuration conserve les réglages premium du moteur de charting TradingSpace.
+          </p>
+        </header>
 
-          <Card>
-            <CardHeader className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <CardTitle>Template de poste</CardTitle>
-                <CardDescription>Moduler l'espace selon vos rituels</CardDescription>
+        {detachedSessions.length > 0 ? (
+          <section className="space-y-5 rounded-3xl border border-white/10 bg-white/[0.05] p-6 shadow-[0_30px_60px_rgba(10,8,35,0.35)]">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="space-y-2">
+                <h2 className="text-xl font-semibold tracking-tight">Fenêtres détachées</h2>
+                <p className="text-sm text-white/60">
+                  Pilotez les workspaces ouverts dans des fenêtres Windows dédiées et gardez un œil sur leur synchronisation.
+                </p>
               </div>
-              <Select value={template} onChange={(event) => setTemplate(event.target.value)} className="w-[220px]">
-                {Object.entries(TEMPLATE_CONFIGS).map(([key, config]) => (
-                  <option key={key} value={key}>
-                    {config.label}
-                  </option>
-                ))}
-              </Select>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-3">
-              {Object.entries(TEMPLATE_CONFIGS).map(([key, config]) => {
-                const isActive = template === key;
+              <Badge variant="outline" className="border-emerald-400/30 text-[11px] uppercase tracking-[0.3em] text-emerald-200">
+                Multi-fenêtres
+              </Badge>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {detachedSessions.map((session) => {
+                const statusConfig = (() => {
+                  if (session.error) {
+                    return {
+                      label: session.error,
+                      tone: "text-rose-200",
+                      border: "border-rose-500/30",
+                      icon: AlertTriangle
+                    };
+                  }
+                  if (session.isLoading) {
+                    return {
+                      label: "Initialisation du flux",
+                      tone: "text-amber-200",
+                      border: "border-amber-400/30",
+                      icon: Loader2
+                    };
+                  }
+                  return {
+                    label: session.priceSource ?? "Flux synchronisé",
+                    tone: "text-emerald-200",
+                    border: "border-emerald-400/30",
+                    icon: CheckCircle2
+                  };
+                })();
+
+                const StatusIcon = statusConfig.icon;
+
                 return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setTemplate(key)}
-                    className={cn(
-                      "flex h-full flex-col rounded-2xl border border-dashed border-border/60 bg-secondary/50 p-5 text-left transition-all hover:border-foreground/40",
-                      isActive && "border-primary bg-primary/10"
-                    )}
+                  <div
+                    key={session.id}
+                    className="group flex flex-col justify-between gap-4 rounded-2xl border border-white/10 bg-black/40 p-5 shadow-[0_20px_40px_rgba(8,7,20,0.45)] transition hover:border-white/20 hover:bg-black/50"
                   >
-                    <span className="text-sm font-semibold">{config.label}</span>
-                    <span className="mt-2 text-xs text-muted-foreground">
-                      {Object.entries(config.modules)
-                        .filter(([, visible]) => visible)
-                        .map(([module]) => module)
-                        .join(" · ")}
-                    </span>
-                  </button>
+                    <div className="flex flex-col gap-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.3em] text-white/40">{session.blueprintName}</p>
+                          <p className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                            {session.symbol}
+                            {session.displayAggregation ? (
+                              <span className="ml-2 text-sm text-white/50">{session.displayAggregation}</span>
+                            ) : null}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => closeDetachedSession(session.id)}
+                          className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.2em] text-white/60 transition hover:border-white/30 hover:text-white"
+                        >
+                          Fermer
+                        </button>
+                      </div>
+                      <div
+                        className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs uppercase tracking-[0.25em] ${statusConfig.border} ${statusConfig.tone}`}
+                      >
+                        <StatusIcon className={`h-3.5 w-3.5 ${statusConfig.icon === Loader2 ? "animate-spin" : ""}`} />
+                        <span className="truncate">{statusConfig.label}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-3 text-sm text-white/60">
+                        <span className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 text-white/30" /> Ouverte à {timeFormatter.format(session.openedAt)}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <MonitorPlay className="h-4 w-4 text-white/30" /> Dernière synchro {formatRelativeTime(session.lastPing ?? session.lastUpdated)}
+                        </span>
+                        {session.lastUpdated ? (
+                          <span className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-white/30" /> Prix mis à jour {formatRelativeTime(session.lastUpdated)}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-3">
+                      <Button
+                        variant="secondary"
+                        className="flex items-center gap-2 border border-white/10 bg-transparent text-white hover:bg-white/10"
+                        onClick={() => focusDetachedSession(session.id)}
+                      >
+                        <SquareArrowOutUpRight className="h-4 w-4" />
+                        Afficher
+                      </Button>
+                    </div>
+                  </div>
                 );
               })}
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="grid gap-10 lg:grid-cols-3">
+          {CHART_BLUEPRINTS.map((blueprint) => (
+            <Card
+              key={blueprint.id}
+              className="group relative overflow-hidden border-white/10 bg-white/[0.06] backdrop-blur-sm transition hover:-translate-y-1 hover:border-white/20"
+            >
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/[0.08] via-transparent to-indigo-500/10 opacity-0 transition group-hover:opacity-100" />
+              <CardHeader className="relative space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-2xl font-semibold text-white">{blueprint.name}</CardTitle>
+                  <Badge variant="outline" className="border-white/20 text-[11px] uppercase tracking-[0.3em] text-white/60">
+                    {blueprint.tagline}
+                  </Badge>
+                </div>
+                <CardDescription className="text-sm leading-relaxed text-white/60">
+                  {blueprint.description}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="relative space-y-6">
+                <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.25em] text-white/60">
+                  {(blueprint.metrics ?? []).map((metric) => (
+                    <span
+                      key={metric}
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-white/70"
+                    >
+                      {metric}
+                    </span>
+                  ))}
+                </div>
+                <div className="grid gap-3">
+                  <Button
+                    className="flex items-center justify-center gap-2"
+                    onClick={() => openWorkspaceHere(blueprint)}
+                  >
+                    <PanelsTopLeft className="h-4 w-4" />
+                    Lancer dans l'espace courant
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="flex items-center justify-center gap-2 border border-white/10 bg-transparent text-white hover:bg-white/10"
+                    onClick={() => openWorkspaceWindow(blueprint)}
+                  >
+                    <SquareArrowOutUpRight className="h-4 w-4" />
+                    Ouvrir en fenêtre dédiée
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/60">
+                  <div className="flex items-center gap-2">
+                    <MonitorPlay className="h-4 w-4" />
+                    <span>Workspace immersif</span>
+                  </div>
+                  <ArrowUpRight className="h-4 w-4 text-white/40" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </section>
       </div>
     </div>
   );
