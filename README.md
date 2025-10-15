@@ -1,6 +1,6 @@
-# TradingSpace
+# TradingSpace (WIP)
 
-Prototype d'interface de tradin, fusionnant l'ergonomie de TradingView avec la puissance d'ATAS, Sierra Chart et Bookmap.
+Prototype d'interface de trading, fusionnant l'ergonomie de TradingView avec la puissance d'ATAS, Sierra Chart et Bookmap.
 
 ## Prototype interactif
 - Interface web avec graphique temps réel, carnet d'ordres, flux d'exécutions et tableau de bord.
