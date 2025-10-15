@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TradingSpace Prototype</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand__accent">Trading</span><span>Space</span>
+      </div>
+      <div class="session-info" role="status">
+        <span class="session-info__symbol" aria-label="Symbole sélectionné">ES</span>
+        <span class="session-info__exchange" aria-label="Marché">CME Futures</span>
+        <span class="session-info__status" aria-label="Statut du marché">Marché ouvert</span>
+      </div>
+      <div class="controls">
+        <button id="theme-toggle" class="button" type="button">Mode sombre</button>
+        <button class="button button--primary" type="button">Passer un ordre</button>
+      </div>
+    </header>
+
+    <main class="layout" data-template="balanced">
+      <section class="layout__primary" aria-labelledby="chart-title">
+        <div class="module module--toolbar" role="toolbar" aria-label="Outils du graphique">
+          <div class="toolbar__group">
+            <label class="toolbar__label" for="symbol-search">Symbole</label>
+            <input id="symbol-search" class="input" type="search" placeholder="Rechercher un actif" />
+          </div>
+          <div class="toolbar__group">
+            <span class="toolbar__label">Unités de temps</span>
+            <div class="toolbar__buttons" role="group" aria-label="Sélection de timeframe">
+              <button class="chip" data-timeframe="1m">1m</button>
+              <button class="chip" data-timeframe="5m">5m</button>
+              <button class="chip chip--active" data-timeframe="15m">15m</button>
+              <button class="chip" data-timeframe="1h">1h</button>
+              <button class="chip" data-timeframe="1d">1j</button>
+            </div>
+          </div>
+          <div class="toolbar__group">
+            <span class="toolbar__label">Indicateurs</span>
+            <label class="toggle">
+              <input type="checkbox" checked data-indicator="ema" />
+              <span>EMA</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" data-indicator="vwaps" />
+              <span>VWAP</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" checked data-indicator="volume-profile" />
+              <span>Profile volume</span>
+            </label>
+          </div>
+          <div class="toolbar__group">
+            <label class="toolbar__label" for="template-select">Templates</label>
+            <select id="template-select" class="select" aria-label="Changer de template d'affichage">
+              <option value="balanced">Vue équilibrée</option>
+              <option value="orderflow">Flux order flow (ATAS)</option>
+              <option value="heatmap">Vue heatmap (Bookmap)</option>
+            </select>
+          </div>
+        </div>
+        <article class="module module--chart" data-module="chart" aria-label="Graphique de prix">
+          <header class="module__header">
+            <h2 id="chart-title">ES 03-24</h2>
+            <div class="module__meta">
+              <span class="price" aria-label="Dernier prix">4 527,75</span>
+              <span class="price-change" aria-label="Variation">+12,5 (+0,28%)</span>
+            </div>
+          </header>
+          <canvas id="price-chart" width="1600" height="600" role="img" aria-label="Evolution du prix en 15 minutes"></canvas>
+        </article>
+        <article class="module module--depth" data-module="depth" aria-label="Profondeur de marché">
+          <header class="module__header">
+            <h3>Profondeur de marché</h3>
+            <div class="module__meta">
+              <span aria-live="polite">DOM x10 niveaux</span>
+            </div>
+          </header>
+          <div class="depth-grid">
+            <div>
+              <h4 class="depth-grid__title">Achats</h4>
+              <table class="depth-table" aria-describedby="depth-bids" id="orderbook-bids">
+                <thead>
+                  <tr>
+                    <th scope="col">Prix</th>
+                    <th scope="col">Quantité</th>
+                    <th scope="col">Cumul</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div>
+              <h4 class="depth-grid__title">Ventes</h4>
+              <table class="depth-table depth-table--asks" aria-describedby="depth-asks" id="orderbook-asks">
+                <thead>
+                  <tr>
+                    <th scope="col">Prix</th>
+                    <th scope="col">Quantité</th>
+                    <th scope="col">Cumul</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <aside class="layout__secondary" aria-label="Flux et carnets">
+        <section class="module module--tape" data-module="tape" aria-labelledby="tape-title">
+          <header class="module__header">
+            <h3 id="tape-title">Flux d'exécutions</h3>
+            <button class="chip chip--ghost" type="button">Filtrer</button>
+          </header>
+          <ul class="tape" id="trade-tape" role="list"></ul>
+        </section>
+
+        <section class="module module--metrics" data-module="metrics" aria-labelledby="metrics-title">
+          <header class="module__header">
+            <h3 id="metrics-title">Tableau de bord</h3>
+          </header>
+          <dl class="metrics" id="metrics"></dl>
+        </section>
+
+        <section class="module module--alerts" data-module="alerts" aria-labelledby="alerts-title">
+          <header class="module__header">
+            <h3 id="alerts-title">Alertes actives</h3>
+            <button class="chip chip--ghost" type="button">Nouvelle alerte</button>
+          </header>
+          <ul class="alerts" id="alerts-list" role="list"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="app-footer">
+      <div>
+        <span>Latence flux</span>
+        <strong id="latency-indicator">2,4 ms</strong>
+      </div>
+      <div>
+        <span>Qualité connexion</span>
+        <progress id="connectivity" max="100" value="92" aria-label="Qualité de la connexion"></progress>
+      </div>
+      <div class="footer-actions">
+        <button class="chip" type="button">Journal</button>
+        <button class="chip" type="button">Workspace</button>
+        <button class="chip" type="button">Support</button>
+      </div>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
